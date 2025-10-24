@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "UTC",
+  "rangeStrategy": "bump",
+  "schedule": [
+    "Before 10am on Monday"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "*"
+      ],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-non-major",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": false
+    }
+  ]
+}

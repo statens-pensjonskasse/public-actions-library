@@ -1,0 +1,236 @@
+name: Build & Release Maven Library
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        required: true
+        type: string
+        description: Java SDK version to use
+      java-distribution:
+        required: false
+        default: 'temurin'
+        type: string
+        description: Java SDK distribution to use (https://github.com/actions/setup-java?tab=readme-ov-file#supported-distributions)
+      build-goals:
+        required: false
+        type: string
+        default: 'compile'
+        description: Maven build goal(s)
+      test-goals:
+        required: false
+        type: string
+        default: 'verify'
+        description: Maven test goal(s)
+      publish-goals:
+        required: false
+        type: string
+        default: 'deploy -Dmaven.test.skip=true'
+        description: Maven publish goal(s)
+      require-release-flag:
+        required: false
+        type: boolean
+        default: false
+        description: Only create a release if the commit contains [release]
+      minor-pattern:
+        required: false
+        type: string
+        default: '/^(feat|feature)/'
+        description: Pattern for minor version bump
+      major-pattern:
+        required: false
+        type: string
+        default: '/(\!: |BREAKING CHANGE)/'
+        description: Pattern for major version bump
+    outputs:
+      published:
+        description: true if artifacts were published
+        value: ${{ jobs.release.outputs.published }}
+      new-version:
+        description: The new version that was released
+        value: ${{ jobs.release.outputs.new-version }}
+
+env:
+  TZ: 'Europe/Oslo'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      releasing: ${{ steps.check-release.outputs.releasing }}
+    steps:
+      - name: Determine if releasing
+        id: check-release
+        run: |
+          if [[ '${{ github.ref_name }}' != 'main' ]]; then
+            echo "Not on main branch, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+          
+          elif [[ "${{ inputs.require-release-flag }}" == "true" ]]; then
+            if [[ "${{ github.event.head_commit.message }}" == *"[release]"* ]]; then
+              echo "Release commit detected ([release] flag required and present)"
+              echo "releasing=true" >> $GITHUB_OUTPUT
+            else
+              echo "[release] flag required but not present, skipping release"
+              echo "releasing=false" >> $GITHUB_OUTPUT
+            fi
+          
+          else
+            echo "Releasing from main without [release] flag (not required)"
+            echo "releasing=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build, Test and Publish Snapshot Version
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.java-distribution }}
+          cache: maven
+
+      - name: Check version from pom.xml
+        run: |
+          RAW_VER=$(./mvnw -q -N help:evaluate -Dexpression=project.version -DforceStdout)
+          echo "Raw version: $RAW_VER"
+          if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
+            echo "::error::Pom-versjonen må være X.Y.Z-SNAPSHOT (fant: $RAW_VER)"; exit 1
+          fi
+
+      - name: Build with maven
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./mvnw -B ${{ inputs.build-goals }}
+
+      - name: Test with maven
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./mvnw -B ${{ inputs.test-goals }}
+
+      - name: Publish Snapshot to GitHub Packages
+        if: ${{ needs.prepare.outputs.releasing  == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./mvnw -B ${{ inputs.publish-goals }} -DskipTests
+
+  release:
+    needs: [prepare, build]
+    if: ${{ needs.prepare.outputs.releasing  == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      new-version: ${{ steps.calculate-version.outputs.new_version }}
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.java-distribution }}
+          cache: maven
+
+      - name: Install GH CLI
+        uses: dev-hanz-ops/install-gh-cli-action@af38ce09b1ec248aeb08eea2b16bbecea9e059f8 # v0.2.1
+        with:
+          gh-cli-version: 2.82.1 # renovate: github-releases=cli/cli
+
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_APP_ID }}
+          private-key: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_SSH_KEY }}
+
+      - name: Calculate new tag for versioning
+        id: calculate-version
+        uses: paulhatch/semantic-version@a8f8f59fd7f0625188492e945240f12d7ad2dca3 #v5.4.0
+        with:
+          tag_prefix: ""
+          search_commit_body: true
+          version_format: '${major}.${minor}.${patch}'
+          major_pattern: ${{ inputs.major-pattern }}
+          minor_pattern: ${{ inputs.minor-pattern }}
+
+      - name: Set Maven release version (X.Y.Z)
+        run: |
+          ./mvnw -B versions:set -DnewVersion=${{ steps.calculate-version.outputs.version }} -DgenerateBackupPoms=false
+          git ls-files --others --exclude-standard --cached -- '*.xml' | grep 'pom.xml$' | grep -v '/target/' | xargs git add
+
+      - name: Commit and Push release version
+        uses: dsanders11/github-app-commit-action@43de6da2f4d927e997c0784c7a0b61bd19ad6aac #v1.5.0
+        with:
+          message: "chore(release): Release av versjon ${{ steps.calculate-version.outputs.version }} [skip actions]"
+          token: ${{ steps.app-token.outputs.token }}
+          fail-on-no-changes: false
+
+      - name: Publish with Maven
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./mvnw -B ${{ inputs.publish-goals }} -DskipTests
+          echo "published=true" >> $GITHUB_OUTPUT
+
+      - name: Set start tag for generating notes
+        id: set-start-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -x
+          if [[ -z "${{ inputs.notes-start-tag }}" ]]; then
+            set +e # Fail silently if no releases are found
+            LATEST_TAG_OR_ERROR=$(gh api repos/${{github.repository}}/releases/latest --jq .tag_name 2>/dev/null)
+            LATEST_TAG=$(if [[ $? = 0 ]]; then echo "$LATEST_TAG_OR_ERROR"; else echo "none"; fi)
+            echo "notes-start-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "notes-start-tag=$inputs.notes-start-tag" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Github Release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.set-start-tag.outputs.notes-start-tag }}" == "none" ]]; then
+            gh release create ${{ steps.calculate-version.outputs.version }}  --generate-notes
+          else
+            gh release create ${{ steps.calculate-version.outputs.version }}  --generate-notes --notes-start-tag ${{ steps.set-start-tag.outputs.notes-start-tag }}
+          fi
+
+      - name: Determine next snapshot version
+        id: bump-semver
+        uses: actions-ecosystem/action-bump-semver@34e334551143a5301f38c830e44a22273c6ff5c5 #v1.0.0
+        with:
+          current_version: ${{ steps.calculate-version.outputs.version }}
+          level: patch
+
+      - name: Update pom to snapshot version
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          git pull
+          ./mvnw -B versions:set -DnewVersion="${{ steps.bump-semver.outputs.new_version }}-SNAPSHOT" -DprocessAllModules=true -DgenerateBackupPoms=false
+          git ls-files --others --exclude-standard --cached -- '*.xml' | grep 'pom.xml$' | grep -v '/target/' | xargs git add
+
+      - name: Commit and push snapshot version
+        uses: dsanders11/github-app-commit-action@43de6da2f4d927e997c0784c7a0b61bd19ad6aac #v1.5.0
+        with:
+          message: "chore(snapshot): Bump snapshot-versjon til ${{ steps.bump-semver.outputs.new_version }}-SNAPSHOT"
+          token: ${{ steps.app-token.outputs.token }}
