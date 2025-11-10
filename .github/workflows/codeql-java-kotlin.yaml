@@ -1,0 +1,112 @@
+name: "CodeQL Advanced Analysis for Java/Kotlin"
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        required: true
+        type: string
+        description: Java SDK version to use
+      java-distribution:
+        required: false
+        default: 'temurin'
+        type: string
+        description: Java SDK distribution to use (https://github.com/actions/setup-java?tab=readme-ov-file#supported-distributions)
+      build-goals:
+        required: false
+        default: '-T1C -Denforcer.skip -Djacoco.skip test-compile'
+        type: string
+        description: Maven build goals to use for compiling the Java/Kotlin code
+      analyze-javascript-typescript:
+        required: false
+        default: false
+        type: boolean
+        description: Whether to also perform static analysis on JavaScript/TypeScript code
+
+env:
+  TZ: 'Europe/Oslo'
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }} with CodeQL
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 30
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.language }}
+      cancel-in-progress: true
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['java-kotlin', 'actions']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'java-kotlin' && 'manual' || 'none' }}
+
+      - name: Set up JDK ${{ inputs.java-version }}
+        if: ${{ matrix.language == 'java-kotlin' }}
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.java-distribution }}
+          cache: maven
+
+      - name: Verify Maven Wrapper exists
+        if: ${{ matrix.language == 'java-kotlin' }}
+        shell: bash
+        run: |
+          if [ ! -f ./mvnw ]; then
+            echo "::error::Maven Wrapper (mvnw) not found in repository root"
+            exit 1
+          fi
+
+      - name: Compile Java/Kotlin code
+        if: ${{ matrix.language == 'java-kotlin' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_FOR_PACKAGES_ACCESS }}
+        run: |
+          ./mvnw -B ${{ inputs.build-goals }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          category: '/language:${{ matrix.language }}'
+
+  analyze-javascript-typescript:
+    name: Analyze JavaScript/TypeScript with CodeQL
+    if: ${{ inputs.analyze-javascript-typescript }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-javascript-typescript
+      cancel-in-progress: true
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          languages: 'javascript-typescript'
+          build-mode: 'none'
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          category: '/language:javascript-typescript'
