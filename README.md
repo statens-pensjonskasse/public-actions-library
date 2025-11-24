@@ -13,7 +13,7 @@ Reference these actions in your workflow:
 ```yaml
 jobs:
   build:
-    uses: team-appark/public-actions-library/.github/workflows/build-library-maven.yaml@main
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-library-maven.yaml@main
     with:
       java-version: '25'
       # ...other inputs...

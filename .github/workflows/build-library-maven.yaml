@@ -25,7 +25,7 @@ on:
       publish-goals:
         required: false
         type: string
-        default: 'deploy -Dmaven.test.skip=true'
+        default: 'deploy -Dmaven.test.skip -Dmdep.analyze.skip'
         description: Maven publish goal(s)
       require-release-flag:
         required: false
@@ -62,11 +62,21 @@ jobs:
     steps:
       - name: Determine if releasing
         id: check-release
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           if [[ '${{ github.ref_name }}' != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
+          elif [[ '${{ github.event.pusher.name }}' == 'public-actions-library[bot]' ]]; then
+            echo "Pushed by bot, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+          
+          if [[ "$COMMIT_MESSAGE" =~ \[skip\ release\]|\[release\ skip\]|\[skip\ publish\]|\[publish\ skip\] ]]; then
+            echo "Commit message contains skip marker, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+        
           elif [[ "${{ inputs.require-release-flag }}" == "true" ]]; then
             if [[ "${{ github.event.head_commit.message }}" == *"[release]"* ]]; then
               echo "Release commit detected ([release] flag required and present)"
@@ -185,7 +195,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          ./mvnw -B ${{ inputs.publish-goals }} -DskipTests
+          ./mvnw -B ${{ inputs.publish-goals }}
           echo "published=true" >> $GITHUB_OUTPUT
 
       - name: Set start tag for generating notes
