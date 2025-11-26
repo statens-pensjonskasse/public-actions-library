@@ -45,7 +45,6 @@ on:
       notes-start-tag:
         required: false
         type: string
-        default: ''
         description: The tag to use as the start point for generating release notes
     outputs:
       published:
