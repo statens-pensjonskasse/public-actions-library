@@ -118,6 +118,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./mvnw -B ${{ inputs.build-goals }}
 
+      - name: Test with maven
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./mvnw -B ${{ inputs.test-goals }}
+
       - name: Check version from pom.xml
         run: |
           set -x
@@ -126,11 +131,6 @@ jobs:
           if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
             echo "::error::Pom-versjonen må være X.Y.Z-SNAPSHOT (fant: $RAW_VER)"; exit 1
           fi
-
-      - name: Test with maven
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./mvnw -B ${{ inputs.test-goals }}
 
       - name: Publish Snapshot to GitHub Packages
         if: ${{ needs.prepare.outputs.releasing == 'false' }}
