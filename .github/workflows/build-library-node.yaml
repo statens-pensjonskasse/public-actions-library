@@ -1,0 +1,461 @@
+name: Build & Release Node/TypeScript Library
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        required: true
+        type: string
+        description: Node.js version to use
+      package-manager:
+        required: false
+        type: string
+        default: 'npm'
+        description: Package manager to use (npm, yarn, or pnpm)
+      build-script:
+        required: false
+        type: string
+        default: 'build'
+        description: npm script name for building
+      test-script:
+        required: false
+        type: string
+        default: 'test'
+        description: npm script name for testing
+      lint-script:
+        required: false
+        type: string
+        default: 'lint'
+        description: npm script name for linting (optional - skipped if not present)
+      publish-script:
+        required: false
+        type: string
+        default: 'publish'
+        description: npm script name for publishing
+      npm-registry:
+        required: false
+        type: string
+        default: 'https://npm.pkg.github.com'
+        description: npm registry URL for publishing
+      require-release-flag:
+        required: false
+        type: boolean
+        default: false
+        description: Only create a release if the commit contains [release]
+      minor-pattern:
+        required: false
+        type: string
+        default: '/^(feat|feature)/'
+        description: Pattern for minor version bump
+      major-pattern:
+        required: false
+        type: string
+        default: '/(\!: |BREAKING CHANGE)/'
+        description: Pattern for major version bump
+      notes-start-tag:
+        required: false
+        type: string
+        description: The tag to use as the start point for generating release notes
+    outputs:
+      published:
+        description: true if artifacts were published
+        value: ${{ jobs.release.outputs.published || 'false' }}
+      new-version:
+        description: The new version that was released
+        value: ${{ jobs.release.outputs.new-version || '' }}
+
+env:
+  TZ: 'Europe/Oslo'
+
+jobs:
+  validate:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Validate inputs
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+          TEST_SCRIPT: ${{ inputs.test-script }}
+          LINT_SCRIPT: ${{ inputs.lint-script }}
+          PUBLISH_SCRIPT: ${{ inputs.publish-script }}
+        run: |
+          # 1. Validate package manager
+          ALLOWED_MANAGERS=("npm" "yarn" "pnpm")
+          if [[ ! " ${ALLOWED_MANAGERS[@]} " =~ " ${PACKAGE_MANAGER} " ]]; then
+            echo "::error::Invalid package-manager: '${PACKAGE_MANAGER}'. Allowed values: $ALLOWED_MANAGERS"
+            exit 1
+          fi
+          
+          # 2. Validate script name characters
+          SCRIPT_NAME_PATTERN='^[a-zA-Z0-9:_-]+$'
+          for script_name in "$BUILD_SCRIPT" "$TEST_SCRIPT" "$LINT_SCRIPT" "$PUBLISH_SCRIPT"; do
+            if [[ -n "$script_name" && ! "$script_name" =~ $SCRIPT_NAME_PATTERN ]]; then
+              echo "::error::Invalid script name format: '${script_name}'. Only alphanumeric, dash, underscore, and colon allowed"
+              exit 1
+            fi
+          done
+          
+          # 3. Check for package.json
+          if [[ ! -f "package.json" ]]; then
+            echo "::error::package.json not found"
+            exit 1
+          fi
+          
+          # 4. Smart Validation for package.json scripts
+          VALIDATION_FAILED=false
+          
+          # Define standard commands that don't REQUIRE a script entry
+          STANDARD_SCRIPTS=" build test publish "
+          
+          validate_script() {
+            local name=$1
+            local label=$2
+          
+            # Skip validation if input is empty
+            [[ -z "$name" ]] && return 0
+          
+            # Check if it's a standard command
+            if [[ "$STANDARD_SCRIPTS" =~ " $name " ]]; then
+              echo "✓ '$name' is a standard command, skipping package.json check"
+              return 0
+            fi
+          
+            # Check if it exists in package.json
+            if ! grep -q "\"$name\":" package.json; then
+              echo "::error::$label script '$name' not found in package.json"
+              VALIDATION_FAILED=true
+            fi
+          }
+          
+          validate_script "$BUILD_SCRIPT" "Build"
+          validate_script "$TEST_SCRIPT" "Test"
+          validate_script "$LINT_SCRIPT" "Lint"
+          validate_script "$PUBLISH_SCRIPT" "Publish"
+          
+          if [[ "$VALIDATION_FAILED" == "true" ]]; then
+            exit 1
+          fi
+          
+          echo "✓ All script inputs validated successfully"
+
+  prepare:
+    name: Determine Release
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      releasing: ${{ steps.check-release.outputs.releasing }}
+    steps:
+      - name: Determine if releasing
+        id: check-release
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [[ '${{ github.ref_name }}' != 'main' ]]; then
+            echo "Not on main branch, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+          
+          elif [[ '${{ github.actor }}' == *'[bot]'* ]] || [[ '${{ github.triggering_actor }}' == *'[bot]'* ]]; then
+            echo "Pushed by bot, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+          
+          elif [[ "$COMMIT_MESSAGE" =~ \[skip\ release\]|\[release\ skip\]|\[skip\ publish\]|\[publish\ skip\] ]]; then
+            echo "Commit message contains skip marker, skipping release"
+            echo "releasing=false" >> $GITHUB_OUTPUT
+        
+          elif [[ "${{ inputs.require-release-flag }}" == "true" ]]; then
+            if [[ "$COMMIT_MESSAGE" =~ \[release\] ]]; then
+              echo "Release commit detected ([release] flag required and present)"
+              echo "releasing=true" >> $GITHUB_OUTPUT
+            else
+              echo "[release] flag required but not present, skipping release"
+              echo "releasing=false" >> $GITHUB_OUTPUT
+            fi
+          
+          else
+            echo "Releasing from main without [release] flag (not required)"
+            echo "releasing=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build and Test
+    needs: [validate, prepare]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install dependencies
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [[ "$PACKAGE_MANAGER" == "npm" ]]; then
+            npm ci
+          elif [[ "$PACKAGE_MANAGER" == "yarn" ]]; then
+            yarn install --frozen-lockfile
+          elif [[ "$PACKAGE_MANAGER" == "pnpm" ]]; then
+            pnpm install --frozen-lockfile
+          fi
+
+      - name: Lint
+        if: inputs.lint-script != ''
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          LINT_SCRIPT: ${{ inputs.lint-script }}
+        run: $PACKAGE_MANAGER run $LINT_SCRIPT
+
+      - name: Build
+        if: inputs.build-script != ''
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: $PACKAGE_MANAGER run $BUILD_SCRIPT
+
+      - name: Test
+        if: inputs.test-script != ''
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: $PACKAGE_MANAGER run $TEST_SCRIPT
+
+  release:
+    name: Release Library
+    needs: [validate, prepare, build]
+    if: ${{ needs.prepare.outputs.releasing == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      new-version: ${{ steps.calculate-version.outputs.version }}
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          registry-url: ${{ inputs.npm-registry }}
+
+      - name: Install dependencies
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [[ "$PACKAGE_MANAGER" == "npm" ]]; then
+            npm ci
+          elif [[ "$PACKAGE_MANAGER" == "yarn" ]]; then
+            yarn install --frozen-lockfile
+          elif [[ "$PACKAGE_MANAGER" == "pnpm" ]]; then
+            pnpm install --frozen-lockfile
+          fi
+
+      - name: Calculate new tag for versioning
+        id: calculate-version
+        uses: paulhatch/semantic-version@a8f8f59fd7f0625188492e945240f12d7ad2dca3 #v5.4.0
+        with:
+          tag_prefix: ""
+          search_commit_body: true
+          version_format: '${major}.${minor}.${patch}'
+          major_pattern: ${{ inputs.major-pattern }}
+          minor_pattern: ${{ inputs.minor-pattern }}
+
+      - name: Update package.json to release version
+        run: |
+          NEW_VERSION=${{ steps.calculate-version.outputs.version }}
+          echo "Setting version to $NEW_VERSION in package.json"
+          npm version $NEW_VERSION --no-git-tag-version
+
+      - name: Build
+        if: inputs.build-script != ''
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: $PACKAGE_MANAGER run $BUILD_SCRIPT
+
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@7e473efe3cb98aa54f8d4bac15400b15fad77d94 # v2.2.0
+        with:
+          app-id: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_APP_ID }}
+          private-key: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_SSH_KEY }}
+
+      - name: Commit and Push release version
+        uses: dsanders11/github-app-commit-action@43de6da2f4d927e997c0784c7a0b61bd19ad6aac #v1.5.0
+        with:
+          message: "chore(release): Release av versjon ${{ steps.calculate-version.outputs.version }} [skip actions]"
+          token: ${{ steps.app-token.outputs.token }}
+          fail-on-no-changes: false
+
+      - name: Publish library
+        id: publish
+        if: inputs.publish-script != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          PUBLISH_SCRIPT: ${{ inputs.publish-script }}
+        run: |
+          $PACKAGE_MANAGER run $PUBLISH_SCRIPT
+          echo "published=true" >> $GITHUB_OUTPUT
+
+      - name: Set start tag for generating notes
+        id: set-start-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_START_TAG: ${{ inputs.notes-start-tag }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ -z "$NOTES_START_TAG" ]]; then
+            set +e # Fail silently if no releases are found
+            LATEST_TAG_OR_ERROR=$(gh api repos/$REPOSITORY/releases/latest --jq .tag_name 2>/dev/null)
+            EXIT_CODE=$?
+            set -e # Re-enable error checking
+            
+            if [[ $EXIT_CODE -eq 0 ]]; then
+              LATEST_TAG="$LATEST_TAG_OR_ERROR"
+            else
+              LATEST_TAG="none"
+            fi
+            echo "notes-start-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "notes-start-tag=$NOTES_START_TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Github Release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.calculate-version.outputs.version }}
+          NOTES_START_TAG: ${{ steps.set-start-tag.outputs.notes-start-tag }}
+        shell: bash
+        run: |
+          # Check if release already exists
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::warning::Release $VERSION already exists, skipping creation"
+            exit 0
+          fi
+          
+          # Create release
+          if [[ $NOTES_START_TAG == "none" ]]; then
+            gh release create "$VERSION" --generate-notes
+          else
+            gh release create "$VERSION" --generate-notes --notes-start-tag $NOTES_START_TAG
+          fi
+          
+          echo "✓ Release $VERSION created successfully"
+
+  summary:
+    name: Workflow Summary
+    needs: [validate, prepare, build, release]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Generate workflow summary
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          RELEASING: ${{ needs.prepare.outputs.releasing }}
+          PUBLISHED: ${{ needs.release.outputs.published }}
+          NEW_VERSION: ${{ needs.release.outputs.new-version }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          NPM_REGISTRY: ${{ inputs.npm-registry }}
+        run: |
+          echo "# Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            echo "## ✅ Build Status: Success" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Build Status: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Job results table
+          echo "### Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Validate
+          if [[ "$VALIDATE_RESULT" == "success" ]]; then
+            echo "| Validate Inputs | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Validate Inputs | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Build
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            echo "| Build & Test | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$BUILD_RESULT" == "skipped" ]]; then
+            echo "| Build & Test | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Build & Test | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Release
+          if [[ "$RELEASE_RESULT" == "success" ]]; then
+            echo "| Release | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASE_RESULT" == "skipped" ]]; then
+            echo "| Release | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Release | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Release information
+          echo "### Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "$RELEASING" == "true" && "$PUBLISHED" == "true" ]]; then
+            echo "🎉 **Published version \`$NEW_VERSION\`**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Version: \`$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Registry: \`$NPM_REGISTRY\`" >> $GITHUB_STEP_SUMMARY
+            echo "- [View Release](https://github.com/${{ github.repository }}/releases/tag/$NEW_VERSION)" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASING" == "true" && "$PUBLISHED" == "false" ]]; then
+            echo "⚠️ **Release skipped** (version already exists)" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASING" == "false" ]]; then
+            echo "ℹ️ **No release created**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            if [[ "$REF_NAME" != "main" ]]; then
+              echo "- Reason: Not on main branch (\`$REF_NAME\`)" >> $GITHUB_STEP_SUMMARY
+            elif [[ "$ACTOR" == *"[bot]"* ]]; then
+              echo "- Reason: Triggered by bot (\`$ACTOR\`)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- Reason: Commit message contains skip marker or [release] flag not present" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Build configuration
+          echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Node.js: \`$NODE_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Package Manager: \`$PACKAGE_MANAGER\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`$REF_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: \`$ACTOR\`" >> $GITHUB_STEP_SUMMARY
+
