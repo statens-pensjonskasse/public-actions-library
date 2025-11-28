@@ -113,14 +113,6 @@ jobs:
           distribution: ${{ inputs.java-distribution }}
           cache: maven
 
-      - name: Check version from pom.xml
-        run: |
-          RAW_VER=$(./mvnw -q -N help:evaluate -Dexpression=project.version -DforceStdout)
-          echo "Raw version: $RAW_VER"
-          if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
-            echo "::error::Pom-versjonen må være X.Y.Z-SNAPSHOT (fant: $RAW_VER)"; exit 1
-          fi
-
       - name: Build with maven
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -130,6 +122,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./mvnw -B ${{ inputs.test-goals }}
+
+      - name: Check version from pom.xml
+        run: |
+          set -x
+          RAW_VER=$(./mvnw -q -N help:evaluate -Dexpression=project.version -DforceStdout)
+          echo "Raw version: $RAW_VER"
+          if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
+            echo "::error::Pom-versjonen må være X.Y.Z-SNAPSHOT (fant: $RAW_VER)"; exit 1
+          fi
 
       - name: Publish Snapshot to GitHub Packages
         if: ${{ needs.prepare.outputs.releasing == 'false' }}
