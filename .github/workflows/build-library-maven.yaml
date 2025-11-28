@@ -115,6 +115,7 @@ jobs:
 
       - name: Check version from pom.xml
         run: |
+          set -x
           RAW_VER=$(./mvnw -q -N help:evaluate -Dexpression=project.version -DforceStdout)
           echo "Raw version: $RAW_VER"
           if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
