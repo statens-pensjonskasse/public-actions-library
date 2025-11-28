@@ -113,6 +113,11 @@ jobs:
           distribution: ${{ inputs.java-distribution }}
           cache: maven
 
+      - name: Build with maven
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./mvnw -B ${{ inputs.build-goals }}
+
       - name: Check version from pom.xml
         run: |
           set -x
@@ -121,11 +126,6 @@ jobs:
           if [[ "$RAW_VER" != *"-SNAPSHOT" ]]; then
             echo "::error::Pom-versjonen må være X.Y.Z-SNAPSHOT (fant: $RAW_VER)"; exit 1
           fi
-
-      - name: Build with maven
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./mvnw -B ${{ inputs.build-goals }}
 
       - name: Test with maven
         env:
