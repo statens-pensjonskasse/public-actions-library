@@ -1,12 +1,12 @@
-# Node/TypeScript GitHub Action Workflow
+# Build & Release Node/TypeScript Action
 
-Build, test, and release TypeScript GitHub Actions with automated version tag management.
+Reusable workflow for building, testing, and releasing GitHub Actions with automated semantic versioning.
 
 ## Quick Start
 
 ```yaml
-# .github/workflows/ci.yaml
-name: CI/CD
+# .github/workflows/build-and-release.yaml
+name: Build and Release
 
 on:
   push:
@@ -15,163 +15,122 @@ on:
 
 jobs:
   build-and-release:
-    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-action-node.yaml@main
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-action-node.yaml@SHA # v1.0.0
     permissions:
       contents: write
-    secrets: inherit
+    with:
+      node-version: '24'
 ```
 
-## Prerequisites
+## What It Does
 
-- `package.json` with `build` and `test` scripts (and `lint` if configured)
-- All configured scripts must be defined in package.json's `scripts` section
-- Compiled JavaScript files committed to repository (typically in `dist/` or `lib/`)
+1. **Validates** - Checks inputs and verifies scripts exist in `package.json`
+2. **Builds** - Installs dependencies, lints, builds, and tests your action
+3. **Verifies** - Ensures compiled files are committed and in sync
+4. **Releases** - Creates GitHub release with semantic versioning (main branch only)
+5. **Tags** - Updates `v1` and `v1.2` tags for easy consumption
 
-## Key Features
+## Requirements
 
-✅ **Built File Validation** - Ensures compiled JS is in sync with TypeScript  
-✅ **Version Tag Management** - Auto-updates v1, v1.2 tags for easy consumption  
-✅ **Package Manager Support** - npm, yarn, or pnpm  
-✅ **Security Hardened** - Input validation prevents command injection
+- `package.json` in repository root
+- Scripts defined in `package.json`: `build`, `test`, and optionally `lint`
+- Compiled JavaScript committed (e.g., `dist/index.js`)
 
-## Configuration
+## Inputs
 
-### Inputs
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `node-version` | ✅ | - | Node.js version |
+| `package-manager` | | `'npm'` | `npm`, `yarn`, or `pnpm` |
+| `build-script` | | `'build'` | Script name for building |
+| `test-script` | | `'test'` | Script name for testing |
+| `lint-script` | | `'lint'` | Script name for linting (skip if empty) |
+| `require-release-flag` | | `false` | Only release if commit contains `[release]` |
+| `minor-pattern` | | `'/^(feat\|feature)/'` | Regex for minor version bump |
+| `major-pattern` | | `'/(\!: \|BREAKING CHANGE)/'` | Regex for major version bump |
+| `notes-start-tag` | | - | Tag to start release notes from |
 
-| Input | Default                       | Description |
-|-------|-------------------------------|-------------|
-| `node-version` | `'24'`                        | Node.js version |
-| `package-manager` | `'npm'`                       | Package manager: `npm`, `yarn`, or `pnpm` |
-| `build-script` | `'build'`                     | npm script for building |
-| `test-script` | `'test'`                      | npm script for testing |
-| `lint-script` | `'lint'`                      | npm script for linting (optional) |
-| `require-release-flag` | `false`                       | Require `[release]` in commit message |
-| `minor-pattern` | `'/^(feat\|feature)/'`        | Pattern for minor version bump |
-| `major-pattern` | `'/(\!: \|BREAKING CHANGE)/'` | Pattern for major version bump |
-| `notes-start-tag` | -                             | Starting tag for release notes |
-
-### Outputs
+## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `published` | `true` if a release was created |
-| `new-version` | The version that was released (e.g., `1.2.3`) |
+| `published` | `'true'` if release was created, `'false'` otherwise |
+| `new-version` | Version released (e.g., `v1.2.3`) or empty string |
 
 ## Examples
 
-### With pnpm
+### Using pnpm
 ```yaml
-with:
-  package-manager: 'pnpm'
-  node-version: '24'
+jobs:
+  build-and-release:
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-action-node.yaml@SHA # v1.0.0
+    permissions:
+      contents: write
+    with:
+      node-version: '24'
+      package-manager: 'pnpm'
 ```
 
-### Custom Scripts
+### Custom script names
 ```yaml
 with:
-  build-script: 'build:production'
+  build-script: 'compile'
   test-script: 'test:ci'
-  lint-script: 'lint:all'
+  lint-script: 'check'
 ```
 
-### Require [release] Flag
+### Skipping steps
 ```yaml
 with:
-  require-release-flag: true
+  lint-script: ''
+  test-script: ''
 ```
 
-## Workflow Steps
+### Require [release] flag
+```yaml
+with:
+  require-release-flag: true  # Only release commits with [release] in message
+```
 
-1. **Validate** - Security check on inputs and verify all required scripts exist in package.json
-2. **Prepare** - Determine if should release
-3. **Build** - Install deps → Lint → Build → Test → Validate compiled files
-4. **Release** - Create release → Update version tags (v1, v1.2)
-5. **Summary** - Display workflow results
+## Release Behavior
+
+Releases automatically from `main` branch. 
+Use `[skip release]` in commit message to skip, or set `require-release-flag: true` to only release with `[release]` flag. 
+See [Release Control](../README.md#release-control) for details.
+
+### Version Bumping
+
+Uses commit messages to determine version:
+- **Major** (1.x.x → 2.0.0): `feat!:`, `BREAKING CHANGE`, or matches `major-pattern`
+- **Minor** (1.2.x → 1.3.0): `feat:`, `feature:`, or matches `minor-pattern`
+- **Patch** (1.2.3 → 1.2.4): All other commits (`fix:`, `chore:`, etc.)
+
+See [Semantic Versioning](../README.md#semantic-versioning) for more details.
+
+### Version Tags
+
+Creates three tags:
+- `v1.2.3` - Exact version (immutable)
+- `v1.2` - Latest patch (updated on each patch)
+- `v1` - Latest minor+patch (updated on each release)
+
+Users can reference:
+```yaml
+uses: your-org/action@v1        # Always latest (recommended)
+uses: your-org/action@v1.2      # Pin to minor version
+uses: your-org/action@v1.2.3    # Pin to exact version
+```
 
 ## Built Files Validation
 
-**Critical:** GitHub Actions require compiled JavaScript to be committed.
+The workflow ensures compiled files are up-to-date by checking for uncommitted changes after build.
 
-After building, the workflow checks:
-```bash
-git status --porcelain  # Must be empty
-```
-
-If validation fails:
-```
-Built files are not in sync with source code!
-Please rebuild locally and commit:
-  npm run build
-  git add dist/
-  git commit -m 'chore: rebuild action'
-```
-
-## Version Tags
-
-The workflow creates and maintains version tags:
-
-- `v1.2.3` - Exact version (immutable)
-- `v1.2` - Latest patch (moving tag)
-- `v1` - Latest minor (moving tag)
-
-Users reference your action with:
-```yaml
-- uses: your-org/your-action@v1      # Recommended
-- uses: your-org/your-action@v1.2    # Pin to minor
-- uses: your-org/your-action@v1.2.3  # Pin to exact
-```
-
-## Repository Structure
-
-```
-your-action/
-├── .github/workflows/ci.yaml
-├── src/
-│   ├── index.ts
-│   └── main.ts
-├── dist/              # ← Must be committed!
-│   └── index.js
-├── action.yml
-├── package.json
-└── tsconfig.json
-```
-
-## Troubleshooting
-
-### Script not found in package.json
-If validation fails with "Required script 'X' not found in package.json":
-1. Check your package.json has the script defined:
-   ```json
-   "scripts": {
-     "build": "tsc",
-     "test": "jest",
-     "lint": "eslint src/**/*.ts"
-   }
-   ```
-2. Or adjust the workflow input to match your script name:
-   ```yaml
-   with:
-     lint-script: 'lint:all'  # Match your actual script name
-   ```
-3. Or set the input to empty string to skip:
-   ```yaml
-   with:
-     lint-script: ''  # Skip linting
-   ```
-
-### Built files not in sync
+**If validation fails:**
 ```bash
 npm run build
 git add dist/
 git commit -m "chore: rebuild action"
+git push
 ```
 
-### No release created
-- Check you're on `main` branch
-- Ensure no skip markers in commit (`[skip release]`)
-- If `require-release-flag: true`, add `[release]` to commit
-
-### Version not incrementing
-Use conventional commits: `feat:`, `fix:`, `feat!:`  
-See [README](../README.md#semantic-versioning) for details.
-
+This is required because GitHub Actions run the committed JavaScript, not TypeScript source.

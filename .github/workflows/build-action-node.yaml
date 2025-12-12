@@ -4,9 +4,8 @@ on:
   workflow_call:
     inputs:
       node-version:
-        required: false
+        required: true
         type: string
-        default: '24'
         description: Node.js version to use
       package-manager:
         required: false

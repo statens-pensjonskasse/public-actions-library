@@ -1,12 +1,12 @@
-# Maven Library Workflow
+# Build & Release Maven Library
 
-Build, test, and release Maven libraries with automatic version management and GitHub Packages publishing.
+Reusable workflow for building, testing, and releasing Maven libraries with automated semantic versioning and GitHub Packages publishing.
 
 ## Quick Start
 
 ```yaml
-# .github/workflows/ci.yaml
-name: CI/CD
+# .github/workflows/build-and-release.yaml
+name: Build and Release
 
 on:
   push:
@@ -15,97 +15,109 @@ on:
 
 jobs:
   build-and-release:
-    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-library-maven.yaml@main
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-library-maven.yaml@SHA # v1.0.0
     permissions:
       contents: write
       packages: write
     secrets: inherit
+    with:
+      java-version: '25'
 ```
 
-## Prerequisites
+## What It Does
 
-- Maven project with `pom.xml`
-- Standard Maven directory structure (`src/main/java`, etc.)
+1. **Prepares** - Determines if should create release
+2. **Builds** - Compiles and tests with Maven
+3. **Publishes Snapshot** - Uploads SNAPSHOT version to GitHub Packages (on PRs/branches)
+4. **Releases** - Updates pom.xml, publishes release version, creates GitHub release (main branch only)
+5. **Updates** - Bumps pom.xml to next SNAPSHOT version after release
 
-## Key Features
+## Requirements
 
-✅ **Automatic Versioning** - Updates pom.xml with semantic versions  
-✅ **SNAPSHOT Publishing** - Publishes snapshots on non-release builds  
-✅ **GitHub Packages** - Publishes artifacts to GitHub Packages  
-✅ **Release Management** - Creates GitHub releases with changelogs
+- Maven project with `pom.xml` in repository root
+- Maven wrapper (`mvnw`) in repository root
+- Version in `pom.xml` must be `X.Y.Z-SNAPSHOT` format
+- Repository secrets: `PUBLIC_ACTIONS_LIBRARY_APP_ID` and `PUBLIC_ACTIONS_LIBRARY_SSH_KEY`
 
-## Configuration
+## Inputs
 
-### Inputs
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `java-version` | ✅ | - | Java SDK version |
+| `java-distribution` | | `'temurin'` | Java distribution (temurin, zulu, etc.) |
+| `build-goals` | | `'compile'` | Maven build goal(s) |
+| `test-goals` | | `'verify'` | Maven test goal(s) |
+| `publish-goals` | | `'deploy -Dmaven.test.skip -Dmdep.analyze.skip'` | Maven publish goal(s) |
+| `require-release-flag` | | `false` | Only release if commit contains `[release]` |
+| `minor-pattern` | | `'/^(feat\|feature)/'` | Regex for minor version bump |
+| `major-pattern` | | `'/(\!: \|BREAKING CHANGE)/'` | Regex for major version bump |
+| `notes-start-tag` | | - | Tag to start release notes from |
 
-| Input | Default | Description |
-|-------|---------|-------------|
-| `java-version` | `'21'` | Java version |
-| `maven-version` | `'3.9.x'` | Maven version |
-| `require-release-flag` | `false` | Require `[release]` in commit message |
-| `minor-pattern` | `'/^(feat\|feature)/'` | Pattern for minor version bump |
-| `major-pattern` | `'/(\!: \|BREAKING CHANGE)/'` | Pattern for major version bump |
-| `notes-start-tag` | - | Starting tag for release notes |
-
-### Outputs
+## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `published` | `true` if a release was created |
-| `new-version` | The version that was released (e.g., `1.2.3`) |
+| `published` | `'true'` if artifacts were published, `'false'` otherwise |
+| `new-version` | Version released (e.g., `1.2.3`) or empty string |
 
 ## Examples
 
-### Custom Java Version
+### Using Java 21
+```yaml
+jobs:
+  build-and-release:
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-library-maven.yaml@SHA # v1.0.0
+    permissions:
+      contents: write
+      packages: write
+    secrets: inherit
+    with:
+      java-version: '21'
+```
+
+### Custom Maven goals
 ```yaml
 with:
-  java-version: '17'
+  java-version: '25'
+  build-goals: 'clean compile'
+  test-goals: 'test'
+  publish-goals: 'deploy'
 ```
 
-### Require [release] Flag
+### Require [release] flag
 ```yaml
 with:
-  require-release-flag: true
+  java-version: '25'
+  require-release-flag: true  # Only release commits with [release] in message
 ```
 
-## Workflow Steps
+## Release Behavior
 
-1. **Validate** - Check inputs and configuration
-2. **Prepare** - Determine if should release
-3. **Build** - Compile → Test → Package
-4. **Publish** - Upload to GitHub Packages (SNAPSHOT or release)
-5. **Release** - Create GitHub release (main branch only)
+Releases automatically from `main` branch. 
+Use `[skip release]` in commit message to skip, or set `require-release-flag: true` to only release with `[release]` flag. 
+See [Release Control](../README.md#release-control) for details.
 
-## Version Management
+### Version Bumping
 
-The workflow updates your `pom.xml` automatically:
+Uses commit messages to determine version:
+- **Major** (1.x.x → 2.0.0): `feat!:`, `BREAKING CHANGE`, or matches `major-pattern`
+- **Minor** (1.2.x → 1.3.0): `feat:`, `feature:`, or matches `minor-pattern`
+- **Patch** (1.2.3 → 1.2.4): All other commits (`fix:`, `chore:`, etc.)
 
-- **On feature branches**: Publishes SNAPSHOT versions (e.g., `1.2.3-SNAPSHOT`)
-- **On main branch**: Creates release versions (e.g., `1.2.3`)
-- **After release**: Bumps to next SNAPSHOT version
+See [Semantic Versioning](../README.md#semantic-versioning) for more details.
 
-## Repository Structure
+### Version Management
 
-```
-your-library/
-├── .github/workflows/ci.yaml
-├── src/
-│   ├── main/java/...
-│   └── test/java/...
-├── pom.xml
-└── README.md
-```
+The workflow automatically manages `pom.xml` versions:
 
-## Troubleshooting
+**On SNAPSHOT builds** (PRs, feature branches):
+- Keeps existing `X.Y.Z-SNAPSHOT` version
+- Publishes to GitHub Packages with `-SNAPSHOT` suffix
 
-### Build fails on test
-Check your test configuration in `pom.xml` and ensure tests pass locally.
-
-### Artifact not published
-- Verify `packages: write` permission is granted
-- Check GitHub Packages settings in your repository
-
-### Version not incrementing
-Use conventional commits: `feat:`, `fix:`, `feat!:`  
-See [README](../README.md#semantic-versioning) for details.
-
+**On release** (main branch):
+1. Removes `-SNAPSHOT` from version → `1.2.3`
+2. Commits: `chore(release): Release av versjon 1.2.3 [skip actions]`
+3. Publishes release version to GitHub Packages
+4. Creates GitHub release with tag `1.2.3`
+5. Bumps to next SNAPSHOT → `1.2.4-SNAPSHOT`
+6. Commits: `chore(snapshot): Bump snapshot-versjon til 1.2.4-SNAPSHOT`
