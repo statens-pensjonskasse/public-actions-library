@@ -249,3 +249,94 @@ jobs:
         with:
           message: "chore(snapshot): Bump snapshot-versjon til ${{ steps.bump-semver.outputs.new_version }}-SNAPSHOT"
           token: ${{ steps.app-token.outputs.token }}
+
+  summary:
+    name: Workflow Summary
+    needs: [prepare, build, release]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Generate workflow summary
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          RELEASING: ${{ needs.prepare.outputs.releasing }}
+          PUBLISHED: ${{ needs.release.outputs.published }}
+          NEW_VERSION: ${{ needs.release.outputs.new-version }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          JAVA_VERSION: ${{ inputs.java-version }}
+          JAVA_DISTRIBUTION: ${{ inputs.java-distribution }}
+        run: |
+          echo "# Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            echo "## ✅ Build Status: Success" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Build Status: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Job results table
+          echo "### Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Build
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            echo "| Build & Test | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$BUILD_RESULT" == "skipped" ]]; then
+            echo "| Build & Test | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Build & Test | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Release
+          if [[ "$RELEASE_RESULT" == "success" ]]; then
+            echo "| Release | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASE_RESULT" == "skipped" ]]; then
+            echo "| Release | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Release | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Release information
+          echo "### Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "$RELEASING" == "true" && "$PUBLISHED" == "true" ]]; then
+            echo "🎉 **Released version \`$NEW_VERSION\`**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Version: \`$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
+            echo "- [View Release](https://github.com/${{ github.repository }}/releases/tag/$NEW_VERSION)" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASING" == "true" && "$PUBLISHED" != "true" ]]; then
+            echo "❌ **Release failed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- [Check the release job logs for details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$RELEASING" == "false" ]]; then
+            echo "ℹ️ **No release created**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            if [[ "$REF_NAME" != "main" ]]; then
+              echo "- Reason: Not on main branch (\`$REF_NAME\`)" >> $GITHUB_STEP_SUMMARY
+            elif [[ "$ACTOR" == *"[bot]"* ]]; then
+              echo "- Reason: Triggered by bot (\`$ACTOR\`)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- Reason: Commit message contains skip marker or [release] flag not present" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Build configuration
+          echo "### Build Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Java Version: \`$JAVA_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Java Distribution: \`$JAVA_DISTRIBUTION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`$REF_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Triggered by: \`$ACTOR\`" >> $GITHUB_STEP_SUMMARY
+
