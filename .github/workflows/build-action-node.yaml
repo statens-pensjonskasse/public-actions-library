@@ -456,4 +456,3 @@ jobs:
           echo "- Package Manager: \`$PACKAGE_MANAGER\`" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: \`$REF_NAME\`" >> $GITHUB_STEP_SUMMARY
           echo "- Triggered by: \`$ACTOR\`" >> $GITHUB_STEP_SUMMARY
-
