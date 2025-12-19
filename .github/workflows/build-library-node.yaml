@@ -31,7 +31,7 @@ on:
         required: false
         type: string
         default: 'publish'
-        description: npm script name for publishing
+        description: Command passed to package manager (e.g., npm publish, yarn publish)
       npm-registry:
         required: false
         type: string

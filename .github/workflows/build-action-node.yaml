@@ -20,13 +20,13 @@ on:
       test-script:
         required: false
         type: string
-        default: 'test'
-        description: npm script name for testing
+        default: 'test --if-present'
+        description: npm script name for testing (skipped if not present)
       lint-script:
         required: false
         type: string
-        default: 'lint'
-        description: npm script name for linting (optional - skipped if not present)
+        default: 'lint --if-present'
+        description: npm script name for linting (skipped if not present)
       require-release-flag:
         required: false
         type: boolean
@@ -74,59 +74,60 @@ jobs:
           TEST_SCRIPT: ${{ inputs.test-script }}
           LINT_SCRIPT: ${{ inputs.lint-script }}
         run: |
-          # Validate package manager
+          # 1. Validate package manager (strict allow-list)
           ALLOWED_MANAGERS=("npm" "yarn" "pnpm")
-          
           if [[ ! " ${ALLOWED_MANAGERS[@]} " =~ " ${PACKAGE_MANAGER} " ]]; then
-            echo "::error::Invalid package-manager: '${PACKAGE_MANAGER}'. Allowed values: npm, yarn, pnpm"
+            echo "::error::Invalid package-manager: '${PACKAGE_MANAGER}'. Allowed package managers $ALLOWED_MANAGERS"
             exit 1
           fi
-          echo "✓ Package manager '${PACKAGE_MANAGER}' is valid"
           
-          # Validate script names (only alphanumeric, dash, underscore, colon allowed)
-          SCRIPT_NAME_PATTERN='^[a-zA-Z0-9:_-]+$'
+          # 2. Security Regex: Allow alphanumeric, spaces, dashes, underscores, and colons.
+          # FORBIDDEN: ; & | $ ` > < ( ) { } [ ]
+          # This prevents command injection and subshells.
+          SAFE_PATTERN='^[a-zA-Z0-9: _-]+$'
           
-          for script_name in "$BUILD_SCRIPT" "$TEST_SCRIPT" "$LINT_SCRIPT"; do
-            if [[ -n "$script_name" && ! "$script_name" =~ $SCRIPT_NAME_PATTERN ]]; then
-              echo "::error::Invalid script name: '${script_name}'. Only alphanumeric, dash, underscore, and colon allowed"
-              exit 1
+          VALIDATION_FAILED=false
+          
+          validate_security() {
+            local input_val="$1"
+            local label="$2"
+          
+            [[ -z "$input_val" ]] && return 0
+          
+            if [[ ! "$input_val" =~ $SAFE_PATTERN ]]; then
+              echo "::error::Security violation in $label input: '$input_val'. Only alphanumeric, spaces, dashes, underscores, and colons are allowed to prevent command injection."
+              VALIDATION_FAILED=true
             fi
-          done
-          echo "✓ Script names are valid"
+          }
           
-          # Validate that package.json exists
+          validate_security "$BUILD_SCRIPT" "Build"
+          validate_security "$TEST_SCRIPT" "Test"
+          validate_security "$LINT_SCRIPT" "Lint"
+          
+          if [[ "$VALIDATION_FAILED" == "true" ]]; then
+            exit 1
+          fi
+          
+          echo "✓ Inputs passed security validation (no injection characters detected)"
+          
+          # 3. Validate that package.json exists
           if [[ ! -f "package.json" ]]; then
             echo "::error::package.json not found in repository root"
             exit 1
           fi
           echo "✓ package.json exists"
           
-          # Validate that required scripts are defined in package.json
-          VALIDATION_FAILED=false
-          
+          # 4. Validate that build script is defined (required for built files validation)
           if [[ -n "$BUILD_SCRIPT" ]] && ! grep -q "\"$BUILD_SCRIPT\"" package.json; then
             echo "::error::Required build script '$BUILD_SCRIPT' not found in package.json"
-            VALIDATION_FAILED=true
-          fi
-          
-          if [[ -n "$TEST_SCRIPT" ]] && ! grep -q "\"$TEST_SCRIPT\"" package.json; then
-            echo "::error::Required test script '$TEST_SCRIPT' not found in package.json"
-            VALIDATION_FAILED=true
-          fi
-          
-          if [[ -n "$LINT_SCRIPT" ]] && ! grep -q "\"$LINT_SCRIPT\"" package.json; then
-            echo "::error::Required lint script '$LINT_SCRIPT' not found in package.json"
-            VALIDATION_FAILED=true
-          fi
-          
-          if [[ "$VALIDATION_FAILED" == "true" ]]; then
             echo ""
             echo "Available scripts in package.json:"
             grep -A 20 '"scripts"' package.json | grep -E '^\s*"[^"]+":' || echo "  (none found)"
             exit 1
           fi
           
-          echo "✓ All required scripts are defined in package.json"
+          echo "✓ Build script validated"
+          echo "✓ All validations passed"
 
   prepare:
     name: Determine Release

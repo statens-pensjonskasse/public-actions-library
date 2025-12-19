@@ -34,8 +34,11 @@ jobs:
 ## Requirements
 
 - `package.json` in repository root
-- Scripts defined in `package.json`: `build`, `test`, `publish`, and optionally `lint`
+- Optional scripts in `package.json`:
+  - `build`, `test`, `lint` - executed via `npm run <script> --if-present`
 - Repository secrets: `PUBLIC_ACTIONS_LIBRARY_APP_ID` and `PUBLIC_ACTIONS_LIBRARY_SSH_KEY` (for committing version changes)
+
+**Note:** Publishing uses the built-in `npm publish` / `yarn publish` / `pnpm publish` command, not a package.json script.
 
 ## Inputs
 
@@ -43,10 +46,10 @@ jobs:
 |-------|----------|---------|-------------|
 | `node-version` | ✅ | - | Node.js version |
 | `package-manager` | | `'npm'` | `npm`, `yarn`, or `pnpm` |
-| `build-script` | | `'build'` | Script name for building |
-| `test-script` | | `'test'` | Script name for testing |
-| `lint-script` | | `'lint'` | Script name for linting (skip if empty) |
-| `publish-script` | | `'publish'` | Script name for publishing to npm registry |
+| `build-script` | | `'build --if-present'` | Script name for building (skipped if not in package.json) |
+| `test-script` | | `'test --if-present'` | Script name for testing (skipped if not in package.json) |
+| `lint-script` | | `'lint --if-present'` | Script name for linting (skipped if not in package.json) |
+| `publish-script` | | `'publish'` | Command passed to package manager (e.g., `npm publish`, `yarn publish`) |
 | `npm-registry` | | `'https://npm.pkg.github.com'` | npm registry URL for publishing |
 | `require-release-flag` | | `false` | Only release if commit contains `[release]` |
 | `minor-pattern` | | `'/^(feat\|feature)/'` | Regex for minor version bump |
@@ -100,13 +103,6 @@ with:
   publish-script: 'release:publish'
 ```
 
-### Skipping steps
-```yaml
-with:
-  lint-script: ''  # Skip linting
-  test-script: ''  # Skip testing (not recommended)
-```
-
 ### Require [release] flag
 ```yaml
 with:
@@ -148,7 +144,7 @@ The workflow automatically manages `package.json` versions:
 
 ### Example Scripts
 
-Your `package.json` should include the necessary scripts:
+Build, test, and lint scripts in `package.json` are optional:
 
 ```json
 {
@@ -157,10 +153,37 @@ Your `package.json` should include the necessary scripts:
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "lint": "eslint src/",
-    "publish": "npm publish"
+    "lint": "eslint src/"
   }
 }
+```
+
+**Note:** These scripts are executed via `npm run <script>` and will be skipped if not present (due to `--if-present` flag).
+
+The `publish` command is different - it uses the built-in package manager command:
+- Workflow runs: `npm publish` (or `yarn publish`, `pnpm publish`)
+- No script needed in `package.json`
+
+To customize publishing, you can:
+
+1. **Use a custom script via `run`:**
+```yaml
+with:
+  publish-script: 'run my-publish'  # Runs: npm run my-publish
+```
+
+```json
+{
+  "scripts": {
+    "my-publish": "npm publish --access public"
+  }
+}
+```
+
+2. **Pass additional flags directly:**
+```yaml
+with:
+  publish-script: 'publish --access public'  # Runs: npm publish --access public
 ```
 
 ### Publishing to GitHub Packages
@@ -177,15 +200,6 @@ To publish to GitHub Packages, configure your `package.json`:
 }
 ```
 
-And create a publish script that authenticates properly:
-
-```json
-{
-  "scripts": {
-    "publish": "npm publish"
-  }
-}
-```
 
 The workflow automatically sets `NODE_AUTH_TOKEN` environment variable for authentication.
 
@@ -203,9 +217,6 @@ For npmjs.org, you'll need to add an authentication token:
   "version": "1.0.0",
   "publishConfig": {
     "access": "public"
-  },
-  "scripts": {
-    "publish": "npm publish"
   }
 }
 ```
