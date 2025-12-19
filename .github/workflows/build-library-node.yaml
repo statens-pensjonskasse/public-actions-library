@@ -85,60 +85,42 @@ jobs:
           LINT_SCRIPT: ${{ inputs.lint-script }}
           PUBLISH_SCRIPT: ${{ inputs.publish-script }}
         run: |
-          # 1. Basic format validation (allows flags like --if-present)
-          VALID_COMMAND_PATTERN='^[a-zA-Z0-9: _-]+$'
+          # 1. Validate package manager (strict allow-list)
+          ALLOWED_MANAGERS=("npm" "yarn" "pnpm")
+          if [[ ! " ${ALLOWED_MANAGERS[@]} " =~ " ${PACKAGE_MANAGER} " ]]; then
+            echo "::error::Invalid package-manager: '${PACKAGE_MANAGER}'. Allowed package managers $ALLOWED_MANAGERS"
+            exit 1
+          fi
+          
+          # 2. Security Regex: Allow alphanumeric, spaces, dashes, underscores, and colons.
+          # FORBIDDEN: ; & | $ ` > < ( ) { } [ ]
+          # This prevents command injection and subshells.
+          SAFE_PATTERN='^[a-zA-Z0-9: _-]+$'
+          
           VALIDATION_FAILED=false
           
-          validate_input() {
-            local full_input=$1
-            local label=$2
+          validate_security() {
+            local input_val="$1"
+            local label="$2"
           
-            [[ -z "$full_input" ]] && return 0
+            [[ -z "$input_val" ]] && return 0
           
-            # Check character format
-            if [[ ! "$full_input" =~ $VALID_COMMAND_PATTERN ]]; then
-              echo "::error::Invalid characters in $label: '$full_input'"
-              VALIDATION_FAILED=true
-              return 1
-            fi
-          
-            # Extract the script name (the first word before any flags/spaces)
-            local script_name
-            script_name=$(echo "$full_input" | awk '{print $1}')
-          
-            # Publish is a native command; others must be in package.json
-            if [[ "$script_name" == "publish" ]]; then
-              echo "✓ '$script_name' is a native command"
-              return 0
-            fi
-          
-            # Check package.json scripts object using jq
-            if ! jq -e ".scripts.\"$script_name\"" package.json > /dev/null; then
-              echo "::error::$label script '$script_name' not found in package.json"
+            if [[ ! "$input_val" =~ $SAFE_PATTERN ]]; then
+              echo "::error::Security violation in $label input: '$input_val'. Only alphanumeric, spaces, dashes, underscores, and colons are allowed to prevent command injection."
               VALIDATION_FAILED=true
             fi
           }
           
-          # 2. Check for package.json existence
-          if [[ ! -f "package.json" ]]; then
-            echo "::error::package.json not found"
-            exit 1
-          fi
-          
-          # 3. Run specific validations
-          validate_input "$BUILD_SCRIPT" "Build"
-          validate_input "$TEST_SCRIPT" "Test"
-          validate_input "$LINT_SCRIPT" "Lint"
-          validate_input "$PUBLISH_SCRIPT" "Publish"
+          validate_security "$BUILD_SCRIPT" "Build"
+          validate_security "$TEST_SCRIPT" "Test"
+          validate_security "$LINT_SCRIPT" "Lint"
+          validate_security "$PUBLISH_SCRIPT" "Publish"
           
           if [[ "$VALIDATION_FAILED" == "true" ]]; then
-            echo ""
-            echo "Scripts found in package.json:"
-            jq '.scripts // "No scripts found"' package.json
             exit 1
           fi
           
-          echo "✓ Input validation successful"
+          echo "✓ Inputs passed security validation (no injection characters detected)"
 
   prepare:
     name: Determine Release
