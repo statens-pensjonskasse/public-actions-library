@@ -12,21 +12,21 @@ on:
         type: string
         default: 'npm'
         description: Package manager to use (npm, yarn, or pnpm)
+      lint-script:
+        required: false
+        type: string
+        default: 'lint --if-present'
+        description: npm script name for linting (optional - skipped if not present)
       build-script:
         required: false
         type: string
-        default: 'build'
+        default: 'build --if-present'
         description: npm script name for building
       test-script:
         required: false
         type: string
-        default: 'test'
+        default: 'test --if-present'
         description: npm script name for testing
-      lint-script:
-        required: false
-        type: string
-        default: 'lint'
-        description: npm script name for linting (optional - skipped if not present)
       publish-script:
         required: false
         type: string
