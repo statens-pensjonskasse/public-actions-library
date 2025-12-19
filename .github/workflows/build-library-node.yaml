@@ -166,6 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -175,9 +176,11 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
+          registry-url: ${{ inputs.npm-registry }}
 
       - name: Install dependencies
         env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
         run: |
           if [[ "$PACKAGE_MANAGER" == "npm" ]]; then
@@ -235,6 +238,7 @@ jobs:
 
       - name: Install dependencies
         env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
         run: |
           if [[ "$PACKAGE_MANAGER" == "npm" ]]; then
