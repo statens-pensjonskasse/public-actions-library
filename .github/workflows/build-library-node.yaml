@@ -111,7 +111,7 @@ jobs:
           VALIDATION_FAILED=false
           
           # Define standard commands that don't REQUIRE a script entry
-          STANDARD_SCRIPTS=" build test publish "
+          STANDARD_SCRIPTS=" publish "
           
           validate_script() {
             local name=$1
@@ -312,7 +312,7 @@ jobs:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           PUBLISH_SCRIPT: ${{ inputs.publish-script }}
         run: |
-          $PACKAGE_MANAGER run $PUBLISH_SCRIPT
+          $PACKAGE_MANAGER $PUBLISH_SCRIPT
           echo "published=true" >> $GITHUB_OUTPUT
 
       - name: Set start tag for generating notes
