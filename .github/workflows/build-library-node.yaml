@@ -85,64 +85,60 @@ jobs:
           LINT_SCRIPT: ${{ inputs.lint-script }}
           PUBLISH_SCRIPT: ${{ inputs.publish-script }}
         run: |
-          # 1. Validate package manager
-          ALLOWED_MANAGERS=("npm" "yarn" "pnpm")
-          if [[ ! " ${ALLOWED_MANAGERS[@]} " =~ " ${PACKAGE_MANAGER} " ]]; then
-            echo "::error::Invalid package-manager: '${PACKAGE_MANAGER}'. Allowed values: $ALLOWED_MANAGERS"
-            exit 1
-          fi
+          # 1. Basic format validation (allows flags like --if-present)
+          VALID_COMMAND_PATTERN='^[a-zA-Z0-9: _-]+$'
+          VALIDATION_FAILED=false
           
-          # 2. Validate script name characters
-          SCRIPT_NAME_PATTERN='^[a-zA-Z0-9:_-]+$'
-          for script_name in "$BUILD_SCRIPT" "$TEST_SCRIPT" "$LINT_SCRIPT" "$PUBLISH_SCRIPT"; do
-            if [[ -n "$script_name" && ! "$script_name" =~ $SCRIPT_NAME_PATTERN ]]; then
-              echo "::error::Invalid script name format: '${script_name}'. Only alphanumeric, dash, underscore, and colon allowed"
-              exit 1
+          validate_input() {
+            local full_input=$1
+            local label=$2
+          
+            [[ -z "$full_input" ]] && return 0
+          
+            # Check character format
+            if [[ ! "$full_input" =~ $VALID_COMMAND_PATTERN ]]; then
+              echo "::error::Invalid characters in $label: '$full_input'"
+              VALIDATION_FAILED=true
+              return 1
             fi
-          done
           
-          # 3. Check for package.json
+            # Extract the script name (the first word before any flags/spaces)
+            local script_name
+            script_name=$(echo "$full_input" | awk '{print $1}')
+          
+            # Publish is a native command; others must be in package.json
+            if [[ "$script_name" == "publish" ]]; then
+              echo "✓ '$script_name' is a native command"
+              return 0
+            fi
+          
+            # Check package.json scripts object using jq
+            if ! jq -e ".scripts.\"$script_name\"" package.json > /dev/null; then
+              echo "::error::$label script '$script_name' not found in package.json"
+              VALIDATION_FAILED=true
+            fi
+          }
+          
+          # 2. Check for package.json existence
           if [[ ! -f "package.json" ]]; then
             echo "::error::package.json not found"
             exit 1
           fi
           
-          # 4. Smart Validation for package.json scripts
-          VALIDATION_FAILED=false
-          
-          # Define standard commands that don't REQUIRE a script entry
-          STANDARD_SCRIPTS=" publish "
-          
-          validate_script() {
-            local name=$1
-            local label=$2
-          
-            # Skip validation if input is empty
-            [[ -z "$name" ]] && return 0
-          
-            # Check if it's a standard command
-            if [[ "$STANDARD_SCRIPTS" =~ " $name " ]]; then
-              echo "✓ '$name' is a standard command, skipping package.json check"
-              return 0
-            fi
-          
-            # Check if it exists in package.json
-            if ! grep -q "\"$name\":" package.json; then
-              echo "::error::$label script '$name' not found in package.json"
-              VALIDATION_FAILED=true
-            fi
-          }
-          
-          validate_script "$BUILD_SCRIPT" "Build"
-          validate_script "$TEST_SCRIPT" "Test"
-          validate_script "$LINT_SCRIPT" "Lint"
-          validate_script "$PUBLISH_SCRIPT" "Publish"
+          # 3. Run specific validations
+          validate_input "$BUILD_SCRIPT" "Build"
+          validate_input "$TEST_SCRIPT" "Test"
+          validate_input "$LINT_SCRIPT" "Lint"
+          validate_input "$PUBLISH_SCRIPT" "Publish"
           
           if [[ "$VALIDATION_FAILED" == "true" ]]; then
+            echo ""
+            echo "Scripts found in package.json:"
+            jq '.scripts // "No scripts found"' package.json
             exit 1
           fi
           
-          echo "✓ All script inputs validated successfully"
+          echo "✓ Input validation successful"
 
   prepare:
     name: Determine Release
