@@ -1,4 +1,4 @@
-name: Build & Release Node/TypeScript Action
+name: Build & Release Node/TypeScript Library
 
 on:
   workflow_call:
@@ -12,21 +12,31 @@ on:
         type: string
         default: 'npm'
         description: Package manager to use (npm, yarn, or pnpm)
+      lint-script:
+        required: false
+        type: string
+        default: 'lint --if-present'
+        description: npm script name for linting (optional - skipped if not present)
       build-script:
         required: false
         type: string
-        default: 'build'
+        default: 'build --if-present'
         description: npm script name for building
       test-script:
         required: false
         type: string
         default: 'test --if-present'
-        description: npm script name for testing (skipped if not present)
-      lint-script:
+        description: npm script name for testing
+      publish-script:
         required: false
         type: string
-        default: 'lint --if-present'
-        description: npm script name for linting (skipped if not present)
+        default: 'publish'
+        description: Command passed to package manager (e.g., npm publish, yarn publish)
+      npm-registry:
+        required: false
+        type: string
+        default: 'https://npm.pkg.github.com'
+        description: npm registry URL for publishing
       require-release-flag:
         required: false
         type: boolean
@@ -48,7 +58,7 @@ on:
         description: The tag to use as the start point for generating release notes
     outputs:
       published:
-        description: true if a release was created
+        description: true if artifacts were published
         value: ${{ jobs.release.outputs.published || 'false' }}
       new-version:
         description: The new version that was released
@@ -65,7 +75,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
 
       - name: Validate inputs
         env:
@@ -73,6 +83,7 @@ jobs:
           BUILD_SCRIPT: ${{ inputs.build-script }}
           TEST_SCRIPT: ${{ inputs.test-script }}
           LINT_SCRIPT: ${{ inputs.lint-script }}
+          PUBLISH_SCRIPT: ${{ inputs.publish-script }}
         run: |
           # 1. Validate package manager (strict allow-list)
           ALLOWED_MANAGERS=("npm" "yarn" "pnpm")
@@ -103,35 +114,16 @@ jobs:
           validate_security "$BUILD_SCRIPT" "Build"
           validate_security "$TEST_SCRIPT" "Test"
           validate_security "$LINT_SCRIPT" "Lint"
+          validate_security "$PUBLISH_SCRIPT" "Publish"
           
           if [[ "$VALIDATION_FAILED" == "true" ]]; then
             exit 1
           fi
           
           echo "✓ Inputs passed security validation (no injection characters detected)"
-          
-          # 3. Validate that package.json exists
-          if [[ ! -f "package.json" ]]; then
-            echo "::error::package.json not found in repository root"
-            exit 1
-          fi
-          echo "✓ package.json exists"
-          
-          # 4. Validate that build script is defined (required for built files validation)
-          if [[ -n "$BUILD_SCRIPT" ]] && ! grep -q "\"$BUILD_SCRIPT\"" package.json; then
-            echo "::error::Required build script '$BUILD_SCRIPT' not found in package.json"
-            echo ""
-            echo "Available scripts in package.json:"
-            grep -A 20 '"scripts"' package.json | grep -E '^\s*"[^"]+":' || echo "  (none found)"
-            exit 1
-          fi
-          
-          echo "✓ Build script validated"
-          echo "✓ All validations passed"
 
   prepare:
     name: Determine Release
-    needs: validate
     runs-on: ubuntu-latest
     permissions: {}
     outputs:
@@ -169,17 +161,17 @@ jobs:
           fi
 
   build:
-    name: Build, Test and Validate
+    name: Build and Test
     needs: [validate, prepare]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
@@ -210,23 +202,6 @@ jobs:
           BUILD_SCRIPT: ${{ inputs.build-script }}
         run: $PACKAGE_MANAGER run $BUILD_SCRIPT
 
-      - name: Validate built files are in sync
-        run: |
-          # Check if there are any uncommitted changes after build
-          if [[ -n $(git status --porcelain) ]]; then
-            echo "::error::Built files are not in sync with source code!"
-            echo "The following files have changes:"
-            git status --porcelain
-            echo ""
-            echo "Please rebuild locally and commit the changes:"
-            echo "  npm run build"
-            echo "  git add ."
-            echo "  git commit -m 'chore: rebuild action'"
-            exit 1
-          else
-            echo "✓ Built files are in sync with source code"
-          fi
-
       - name: Test
         if: inputs.test-script != ''
         env:
@@ -235,30 +210,88 @@ jobs:
         run: $PACKAGE_MANAGER run $TEST_SCRIPT
 
   release:
-    name: Release Action
-    needs: [prepare, build]
+    name: Release Library
+    needs: [validate, prepare, build]
     if: ${{ needs.prepare.outputs.releasing == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     outputs:
       new-version: ${{ steps.calculate-version.outputs.version }}
       published: ${{ steps.publish.outputs.published }}
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+          registry-url: ${{ inputs.npm-registry }}
+
+      - name: Install dependencies
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [[ "$PACKAGE_MANAGER" == "npm" ]]; then
+            npm ci
+          elif [[ "$PACKAGE_MANAGER" == "yarn" ]]; then
+            yarn install --frozen-lockfile
+          elif [[ "$PACKAGE_MANAGER" == "pnpm" ]]; then
+            pnpm install --frozen-lockfile
+          fi
 
       - name: Calculate new tag for versioning
         id: calculate-version
         uses: paulhatch/semantic-version@a8f8f59fd7f0625188492e945240f12d7ad2dca3 #v5.4.0
         with:
-          tag_prefix: "v"
+          tag_prefix: ""
           search_commit_body: true
-          version_format: 'v${major}.${minor}.${patch}'
+          version_format: '${major}.${minor}.${patch}'
           major_pattern: ${{ inputs.major-pattern }}
           minor_pattern: ${{ inputs.minor-pattern }}
+
+      - name: Update package.json to release version
+        run: |
+          NEW_VERSION=${{ steps.calculate-version.outputs.version }}
+          echo "Setting version to $NEW_VERSION in package.json"
+          npm version $NEW_VERSION --no-git-tag-version
+
+      - name: Build
+        if: inputs.build-script != ''
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: $PACKAGE_MANAGER run $BUILD_SCRIPT
+
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@7e473efe3cb98aa54f8d4bac15400b15fad77d94 # v2.2.0
+        with:
+          app-id: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_APP_ID }}
+          private-key: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_SSH_KEY }}
+
+      - name: Commit and Push release version
+        uses: dsanders11/github-app-commit-action@43de6da2f4d927e997c0784c7a0b61bd19ad6aac #v1.5.0
+        with:
+          message: "chore(release): Release av versjon ${{ steps.calculate-version.outputs.version }} [skip actions]"
+          token: ${{ steps.app-token.outputs.token }}
+          fail-on-no-changes: false
+
+      - name: Publish library
+        id: publish
+        if: inputs.publish-script != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          PUBLISH_SCRIPT: ${{ inputs.publish-script }}
+        run: |
+          $PACKAGE_MANAGER $PUBLISH_SCRIPT
+          echo "published=true" >> $GITHUB_OUTPUT
 
       - name: Set start tag for generating notes
         id: set-start-tag
@@ -285,7 +318,6 @@ jobs:
           fi
 
       - name: Create Github Release with generated notes
-        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.calculate-version.outputs.version }}
@@ -295,7 +327,6 @@ jobs:
           # Check if release already exists
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "::warning::Release $VERSION already exists, skipping creation"
-            echo "published=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -306,58 +337,7 @@ jobs:
             gh release create "$VERSION" --generate-notes --notes-start-tag $NOTES_START_TAG
           fi
           
-          echo "published=true" >> $GITHUB_OUTPUT
           echo "✓ Release $VERSION created successfully"
-
-      - name: Update major and minor version tags
-        if: steps.calculate-version.outputs.version_type != 'none'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.calculate-version.outputs.version }}
-          MAJOR: ${{ steps.calculate-version.outputs.major }}
-          MINOR: ${{ steps.calculate-version.outputs.minor }}
-          VERSION_TYPE: ${{ steps.calculate-version.outputs.version_type }}
-        shell: bash
-        run: |
-          echo "📦 Version bump type: $VERSION_TYPE"
-          echo "📌 Creating/updating version tags for $VERSION"
-          echo ""
-          TAG_PREFIX: ${{ inputs.tag-prefix }}
-          # Get the SHA for the version tag
-          VERSION_SHA=$(gh api repos/${{ github.repository }}/git/ref/tags/$VERSION --jq .object.sha)
-          
-          # Update major tag (v1)
-          echo "🔄 Updating major tag v$MAJOR → $VERSION"
-          if gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/v$MAJOR" >/dev/null 2>&1; then
-            echo "   Deleted existing tag v$MAJOR"
-          else
-            echo "   No existing tag v$MAJOR found (first release)"
-          fi
-          
-          gh api -X POST "repos/${{ github.repository }}/git/refs" \
-            -f ref="refs/tags/v$MAJOR" \
-            -f sha="$VERSION_SHA" >/dev/null
-          echo "   ✓ Created tag v$MAJOR"
-          
-          # Update minor tag (v1.2)
-          echo ""
-          echo "🔄 Updating minor tag v$MAJOR.$MINOR → $VERSION"
-          if gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/v$MAJOR.$MINOR" >/dev/null 2>&1; then
-            echo "   Deleted existing tag v$MAJOR.$MINOR"
-          else
-            echo "   No existing tag v$MAJOR.$MINOR found (first release)"
-          fi
-          
-          gh api -X POST "repos/${{ github.repository }}/git/refs" \
-            -f ref="refs/tags/v$MAJOR.$MINOR" \
-            -f sha="$VERSION_SHA" >/dev/null
-          echo "   ✓ Created tag v$MAJOR.$MINOR"
-          
-          echo ""
-          echo "✅ Version tags updated successfully!"
-          echo "   • v$VERSION (exact version)"
-          echo "   • v$MAJOR (latest major)"
-          echo "   • v$MAJOR.$MINOR (latest minor)"
 
   summary:
     name: Workflow Summary
@@ -379,6 +359,7 @@ jobs:
           ACTOR: ${{ github.actor }}
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           NODE_VERSION: ${{ inputs.node-version }}
+          NPM_REGISTRY: ${{ inputs.npm-registry }}
         run: |
           echo "# Workflow Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -428,11 +409,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [[ "$RELEASING" == "true" && "$PUBLISHED" == "true" ]]; then
-            echo "🎉 **Released version \`$NEW_VERSION\`**" >> $GITHUB_STEP_SUMMARY
+            echo "🎉 **Published version \`$NEW_VERSION\`**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "- Version: \`$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Major tag: \`v${NEW_VERSION%%.*}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Minor tag: \`v${NEW_VERSION%.*}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Registry: \`$NPM_REGISTRY\`" >> $GITHUB_STEP_SUMMARY
             echo "- [View Release](https://github.com/${{ github.repository }}/releases/tag/$NEW_VERSION)" >> $GITHUB_STEP_SUMMARY
           elif [[ "$RELEASING" == "true" && "$PUBLISHED" == "false" ]]; then
             echo "⚠️ **Release skipped** (version already exists)" >> $GITHUB_STEP_SUMMARY
@@ -456,3 +436,4 @@ jobs:
           echo "- Package Manager: \`$PACKAGE_MANAGER\`" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: \`$REF_NAME\`" >> $GITHUB_STEP_SUMMARY
           echo "- Triggered by: \`$ACTOR\`" >> $GITHUB_STEP_SUMMARY
+

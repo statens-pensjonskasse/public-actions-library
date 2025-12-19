@@ -19,6 +19,22 @@ jobs:
 
 📖 [Documentation](docs/build-action-node.md)
 
+### Node/TypeScript Library
+Build and release npm libraries with automated versioning and npm registry publishing.
+
+```yaml
+jobs:
+  build-and-release:
+    uses: statens-pensjonskasse/public-actions-library/.github/workflows/build-library-node.yaml@SHA # v1.0.0
+    permissions:
+      contents: write
+      packages: write
+    with:
+      node-version: '24'
+```
+
+📖 [Documentation](docs/build-library-node.md)
+
 ### Maven Library
 Build and release Maven libraries with GitHub Packages publishing.
 

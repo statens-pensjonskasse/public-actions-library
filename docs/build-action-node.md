@@ -33,7 +33,9 @@ jobs:
 ## Requirements
 
 - `package.json` in repository root
-- Scripts defined in `package.json`: `build`, `test`, and optionally `lint`
+- Scripts defined in `package.json`:
+  - **Required**: `build` - needed to validate committed built files are in sync
+  - **Optional**: `test`, `lint` - automatically skipped if not present
 - Compiled JavaScript committed (e.g., `dist/index.js`)
 
 ## Inputs
@@ -43,8 +45,8 @@ jobs:
 | `node-version` | ✅ | - | Node.js version |
 | `package-manager` | | `'npm'` | `npm`, `yarn`, or `pnpm` |
 | `build-script` | | `'build'` | Script name for building |
-| `test-script` | | `'test'` | Script name for testing |
-| `lint-script` | | `'lint'` | Script name for linting (skip if empty) |
+| `test-script` | | `'test --if-present'` | Script name for testing (skipped if not in package.json) |
+| `lint-script` | | `'lint --if-present'` | Script name for linting (skipped if not in package.json) |
 | `require-release-flag` | | `false` | Only release if commit contains `[release]` |
 | `minor-pattern` | | `'/^(feat\|feature)/'` | Regex for minor version bump |
 | `major-pattern` | | `'/(\!: \|BREAKING CHANGE)/'` | Regex for major version bump |
@@ -77,13 +79,6 @@ with:
   build-script: 'compile'
   test-script: 'test:ci'
   lint-script: 'check'
-```
-
-### Skipping steps
-```yaml
-with:
-  lint-script: ''
-  test-script: ''
 ```
 
 ### Require [release] flag
