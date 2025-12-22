@@ -30,7 +30,7 @@ on:
       publish-script:
         required: false
         type: string
-        default: 'publish'
+        default: 'publish --access public'
         description: Command passed to package manager (e.g., npm publish, yarn publish)
       npm-registry:
         required: false
