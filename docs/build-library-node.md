@@ -49,7 +49,7 @@ jobs:
 | `build-script` | | `'build --if-present'` | Script name for building (skipped if not in package.json) |
 | `test-script` | | `'test --if-present'` | Script name for testing (skipped if not in package.json) |
 | `lint-script` | | `'lint --if-present'` | Script name for linting (skipped if not in package.json) |
-| `publish-script` | | `'publish'` | Command passed to package manager (e.g., `npm publish`, `yarn publish`) |
+| `publish-script` | | `'publish --access public'` | Command passed to package manager (e.g., `npm publish`, `yarn publish`) |
 | `npm-registry` | | `'https://npm.pkg.github.com'` | npm registry URL for publishing |
 | `require-release-flag` | | `false` | Only release if commit contains `[release]` |
 | `minor-pattern` | | `'/^(feat\|feature)/'` | Regex for minor version bump |
@@ -60,7 +60,7 @@ jobs:
 
 | Output | Description |
 |--------|-------------|
-| `published` | `'true'` if release was created, `'false'` otherwise |
+| `published` | `'true'` if artifacts were published, `'false'` otherwise |
 | `new-version` | Version released (e.g., `1.2.3`) or empty string |
 
 ## Examples
@@ -164,26 +164,28 @@ The `publish` command is different - it uses the built-in package manager comman
 - Workflow runs: `npm publish` (or `yarn publish`, `pnpm publish`)
 - No script needed in `package.json`
 
-To customize publishing, you can:
+The default publish command is `npm publish --access public` (or `yarn publish --access public`, `pnpm publish --access public`).
 
-1. **Use a custom script via `run`:**
+To customize publishing:
+
+**Use a custom script for complex workflows:**
 ```yaml
 with:
-  publish-script: 'run my-publish'  # Runs: npm run my-publish
+  publish-script: 'run release:publish'  # Runs: npm run release:publish
 ```
 
 ```json
 {
   "scripts": {
-    "my-publish": "npm publish --access public"
+    "release:publish": "npm publish --tag next --access public"
   }
 }
 ```
 
-2. **Pass additional flags directly:**
+**Pass different flags directly:**
 ```yaml
 with:
-  publish-script: 'publish --access public'  # Runs: npm publish --access public
+  publish-script: 'publish --tag beta'  # Runs: npm publish --tag beta
 ```
 
 ### Publishing to GitHub Packages
