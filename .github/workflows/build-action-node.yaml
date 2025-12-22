@@ -325,7 +325,6 @@ jobs:
           echo "📦 Version bump type: $VERSION_TYPE"
           echo "📌 Creating/updating version tags for $VERSION"
           echo ""
-          TAG_PREFIX: ${{ inputs.tag-prefix }}
           # Get the SHA for the version tag
           VERSION_SHA=$(gh api repos/${{ github.repository }}/git/ref/tags/$VERSION --jq .object.sha)
           
