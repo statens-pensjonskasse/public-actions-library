@@ -68,12 +68,13 @@ jobs:
         id: check-release
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          GITHUB_EVENT_PUSHER_NAME: ${{ github.event.pusher.name }}
         run: |
-          if [[ '${{ github.ref_name }}' != 'main' ]]; then
+          if [[ '${GITHUB_REF_NAME}' != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
-          elif [[ '${{ github.event.pusher.name }}' == 'public-actions-library[bot]' ]]; then
+          elif [[ '${GITHUB_EVENT_PUSHER_NAME}' == 'public-actions-library[bot]' ]]; then
             echo "Pushed by bot, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
@@ -105,6 +106,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
@@ -116,12 +119,14 @@ jobs:
       - name: Build with maven
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./mvnw -B ${{ inputs.build-goals }}
+          INPUTS_BUILD_GOALS: ${{ inputs.build-goals }}
+        run: ./mvnw -B ${INPUTS_BUILD_GOALS}
 
       - name: Test with maven
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./mvnw -B ${{ inputs.test-goals }}
+          INPUTS_TEST_GOALS: ${{ inputs.test-goals }}
+        run: ./mvnw -B ${INPUTS_TEST_GOALS}
 
       - name: Check version from pom.xml
         run: |
@@ -136,7 +141,8 @@ jobs:
         if: ${{ needs.prepare.outputs.releasing == 'false' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./mvnw -B ${{ inputs.publish-goals }} -DskipTests
+          INPUTS_PUBLISH_GOALS: ${{ inputs.publish-goals }}
+        run: ./mvnw -B ${INPUTS_PUBLISH_GOALS} -DskipTests
 
   release:
     needs: [prepare, build]
@@ -153,6 +159,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
@@ -172,6 +179,7 @@ jobs:
         with:
           app-id: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_APP_ID }}
           private-key: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_SSH_KEY }}
+          permission-contents: write
 
       - name: Calculate new tag for versioning
         id: calculate-version
@@ -185,8 +193,10 @@ jobs:
 
       - name: Set Maven release version (X.Y.Z)
         run: |
-          ./mvnw -B versions:set -DnewVersion=${{ steps.calculate-version.outputs.version }} -DgenerateBackupPoms=false
+          ./mvnw -B versions:set -DnewVersion=${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION} -DgenerateBackupPoms=false
           git ls-files --others --exclude-standard --cached -- '*.xml' | grep 'pom.xml$' | grep -v '/target/' | xargs -r git add
+        env:
+          STEPS_CALCULATE_VERSION_OUTPUTS_VERSION: ${{ steps.calculate-version.outputs.version }}
 
       - name: Commit and Push release version
         uses: dsanders11/github-app-commit-action@2bbcd331016d8c950b05a24b56e7eb9cb50d545e # v2.1.0
@@ -199,35 +209,39 @@ jobs:
         id: publish
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          INPUTS_PUBLISH_GOALS: ${{ inputs.publish-goals }}
         run: |
-          ./mvnw -B ${{ inputs.publish-goals }}
+          ./mvnw -B ${INPUTS_PUBLISH_GOALS}
           echo "published=true" >> $GITHUB_OUTPUT
 
       - name: Set start tag for generating notes
         id: set-start-tag
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUTS_NOTES_START_TAG: ${{ inputs.notes-start-tag }}
         shell: bash
         run: |
           set -x
-          if [[ -z "${{ inputs.notes-start-tag }}" ]]; then
+          if [[ -z "${INPUTS_NOTES_START_TAG}" ]]; then
             set +e # Fail silently if no releases are found
             LATEST_TAG_OR_ERROR=$(gh api repos/${{github.repository}}/releases/latest --jq .tag_name 2>/dev/null)
             LATEST_TAG=$(if [[ $? = 0 ]]; then echo "$LATEST_TAG_OR_ERROR"; else echo "none"; fi)
             echo "notes-start-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           else
-            echo "notes-start-tag=${{ inputs.notes-start-tag }}" >> $GITHUB_OUTPUT
+            echo "notes-start-tag=${INPUTS_NOTES_START_TAG}" >> $GITHUB_OUTPUT
           fi
 
       - name: Create Github Release with generated notes
         env:
           GH_TOKEN: ${{ github.token }}
+          STEPS_SET_START_TAG_OUTPUTS_NOTES_START_TAG: ${{ steps.set-start-tag.outputs.notes-start-tag }}
+          STEPS_CALCULATE_VERSION_OUTPUTS_VERSION: ${{ steps.calculate-version.outputs.version }}
         shell: bash
         run: |
-          if [[ "${{ steps.set-start-tag.outputs.notes-start-tag }}" == "none" ]]; then
-            gh release create ${{ steps.calculate-version.outputs.version }}  --generate-notes
+          if [[ "${STEPS_SET_START_TAG_OUTPUTS_NOTES_START_TAG}" == "none" ]]; then
+            gh release create ${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION}  --generate-notes
           else
-            gh release create ${{ steps.calculate-version.outputs.version }}  --generate-notes --notes-start-tag ${{ steps.set-start-tag.outputs.notes-start-tag }}
+            gh release create ${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION}  --generate-notes --notes-start-tag ${STEPS_SET_START_TAG_OUTPUTS_NOTES_START_TAG}
           fi
 
       - name: Determine next snapshot version
@@ -241,8 +255,10 @@ jobs:
         shell: bash
         run: |
           git pull
-          ./mvnw -B versions:set -DnewVersion="${{ steps.bump-semver.outputs.new_version }}-SNAPSHOT" -DprocessAllModules=true -DgenerateBackupPoms=false
+          ./mvnw -B versions:set -DnewVersion="${STEPS_BUMP_SEMVER_OUTPUTS_NEW_VERSION}-SNAPSHOT" -DprocessAllModules=true -DgenerateBackupPoms=false
           git ls-files --others --exclude-standard --cached -- '*.xml' | grep 'pom.xml$' | grep -v '/target/' | xargs -r git add
+        env:
+          STEPS_BUMP_SEMVER_OUTPUTS_NEW_VERSION: ${{ steps.bump-semver.outputs.new_version }}
 
       - name: Commit and push snapshot version
         uses: dsanders11/github-app-commit-action@2bbcd331016d8c950b05a24b56e7eb9cb50d545e # v2.1.0

@@ -76,6 +76,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate inputs
         env:
@@ -134,11 +136,11 @@ jobs:
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          if [[ '${{ github.ref_name }}' != 'main' ]]; then
+          if [[ '${GITHUB_REF_NAME}' != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
-          elif [[ '${{ github.actor }}' == *'[bot]'* ]] || [[ '${{ github.triggering_actor }}' == *'[bot]'* ]]; then
+          elif [[ '${GITHUB_ACTOR}' == *'[bot]'* ]] || [[ '${{ github.triggering_actor }}' == *'[bot]'* ]]; then
             echo "Pushed by bot, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
@@ -170,6 +172,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -228,6 +232,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -261,9 +266,11 @@ jobs:
 
       - name: Update package.json to release version
         run: |
-          NEW_VERSION=${{ steps.calculate-version.outputs.version }}
+          NEW_VERSION=${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION}
           echo "Setting version to $NEW_VERSION in package.json"
           npm version $NEW_VERSION --no-git-tag-version
+        env:
+          STEPS_CALCULATE_VERSION_OUTPUTS_VERSION: ${{ steps.calculate-version.outputs.version }}
 
       - name: Build
         if: inputs.build-script != ''
@@ -278,6 +285,7 @@ jobs:
         with:
           app-id: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_APP_ID }}
           private-key: ${{ secrets.PUBLIC_ACTIONS_LIBRARY_SSH_KEY }}
+          permission-contents: write
 
       - name: Commit and Push release version
         uses: dsanders11/github-app-commit-action@2bbcd331016d8c950b05a24b56e7eb9cb50d545e # v2.1.0
