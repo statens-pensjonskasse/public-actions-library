@@ -31,7 +31,7 @@ jobs:
         run: |
           COMMIT_MESSAGE_REGEX_SKIP_RELEASE='\[skip release\]|\[release skip\]'
 
-          if [[ '${GITHUB_REF_NAME}' != 'main' ]]; then
+          if [[ "${GITHUB_REF_NAME}" != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "release=false" >> $GITHUB_OUTPUT
           
@@ -39,7 +39,7 @@ jobs:
             echo "Commit message contains skip marker, skipping release"
             echo "release=false" >> $GITHUB_OUTPUT
           
-          elif [[ '${GITHUB_EVENT_PUSHER_NAME}' = 'public-actions-library[bot]' ]]; then
+          elif [[ "${GITHUB_EVENT_PUSHER_NAME}" = 'public-actions-library[bot]' ]]; then
             echo "Pushed by bot, skipping release"
             echo "release=false" >> $GITHUB_OUTPUT
           
