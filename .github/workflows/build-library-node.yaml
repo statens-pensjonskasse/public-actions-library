@@ -136,11 +136,11 @@ jobs:
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          if [[ '${GITHUB_REF_NAME}' != 'main' ]]; then
+          if [[ "${GITHUB_REF_NAME}" != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
-          elif [[ '${GITHUB_ACTOR}' == *'[bot]'* ]] || [[ '${{ github.triggering_actor }}' == *'[bot]'* ]]; then
+          elif [[ "${GITHUB_ACTOR}" == *'[bot]'* ]] || [[ "${GITHUB_TRIGGERING_ACTOR}" == *'[bot]'* ]]; then
             echo "Pushed by bot, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           

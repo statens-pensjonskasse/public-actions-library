@@ -70,11 +70,11 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           GITHUB_EVENT_PUSHER_NAME: ${{ github.event.pusher.name }}
         run: |
-          if [[ '${GITHUB_REF_NAME}' != 'main' ]]; then
+          if [[ "${GITHUB_REF_NAME}" != 'main' ]]; then
             echo "Not on main branch, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
-          elif [[ '${GITHUB_EVENT_PUSHER_NAME}' == 'public-actions-library[bot]' ]]; then
+          elif [[ "${GITHUB_EVENT_PUSHER_NAME}" == 'public-actions-library[bot]' ]]; then
             echo "Pushed by bot, skipping release"
             echo "releasing=false" >> $GITHUB_OUTPUT
           
