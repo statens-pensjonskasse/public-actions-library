@@ -76,7 +76,6 @@ jobs:
         if: ${{ matrix.language == 'java-kotlin' }}
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT_FOR_PACKAGES_ACCESS }}
           INPUTS_BUILD_GOALS: ${{ inputs.build-goals }}
         run: |
           ./mvnw -B ${INPUTS_BUILD_GOALS}
