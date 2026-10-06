@@ -193,7 +193,7 @@ jobs:
 
       - name: Set Maven release version (X.Y.Z)
         run: |
-          ./mvnw -B versions:set -DnewVersion=${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION} -DgenerateBackupPoms=false
+          ./mvnw -B versions:set -DnewVersion=${STEPS_CALCULATE_VERSION_OUTPUTS_VERSION} -DprocessAllModules=true -DgenerateBackupPoms=false
           git ls-files --others --exclude-standard --cached -- '*.xml' | grep 'pom.xml$' | grep -v '/target/' | xargs -r git add
         env:
           STEPS_CALCULATE_VERSION_OUTPUTS_VERSION: ${{ steps.calculate-version.outputs.version }}
